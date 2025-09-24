@@ -14,7 +14,7 @@ public class MyServlet extends HttpServlet {
     protected void doGet(HttpServletRequest req, HttpServletResponse resp) 
             throws ServletException, IOException {
         resp.setContentType("text/html; charset=UTF-8");
-        resp.getWriter().println("<h1>Hello from MyFramework!</h1>");
+        resp.getWriter().println("<h1>Hello from Framework sprint 1!</h1>");
         resp.getWriter().println("<p>URL tapena: " + req.getRequestURI() + "</p>");
     }
 }
