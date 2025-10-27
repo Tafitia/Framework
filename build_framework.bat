@@ -13,9 +13,9 @@ REM Créer aussi un dossier temporaire pour le JAR
 if exist "build" rmdir /s /q "build"
 mkdir "build"
 
-REM Compiler FrontServlet.java
-echo Compilation de FrontServlet.java...
-javac -cp "..\framework_test\lib\servlet-api.jar" -d "build" src\FrontServlet.java
+REM Compiler toutes les classes du framework
+echo Compilation des classes du framework...
+javac -cp "..\framework_test\lib\servlet-api.jar" -d "build" src\*.java
 
 if %ERRORLEVEL% NEQ 0 (
     echo Erreur de compilation!
