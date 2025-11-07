@@ -15,7 +15,9 @@ mkdir "build"
 
 REM Compiler toutes les classes du framework
 echo Compilation des classes du framework...
-javac -cp "..\framework_test\lib\servlet-api.jar" -d "build" src\*.java
+dir /s /b src\*.java util\*.java > sources.txt
+javac -cp "..\framework_test\lib\servlet-api.jar" -d "build" @sources.txt
+del sources.txt
 
 if %ERRORLEVEL% NEQ 0 (
     echo Erreur de compilation!
