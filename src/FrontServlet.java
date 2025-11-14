@@ -30,7 +30,7 @@ public class FrontServlet extends HttpServlet {
     protected void doPost(HttpServletRequest req, HttpServletResponse resp) throws ServletException, IOException {
         findResource(req, resp);
     }
-
+  
     private void findResource(HttpServletRequest req, HttpServletResponse resp) throws ServletException, IOException {
         String path = req.getRequestURI().substring(req.getContextPath().length());
         if (path == null || path.isEmpty()) {
@@ -38,25 +38,34 @@ public class FrontServlet extends HttpServlet {
         }
         
         if(urlMappings.containsKey(path)) {
-                Mapping mapp = urlMappings.get(path);
-                Method method = mapp.getMethod();
-
-                if(method.getReturnType().equals(String.class)) {
-                    try {
-                        Object controllerInstance = mapp.getClazz().getDeclaredConstructor().newInstance();
-                        String result = (String) method.invoke(controllerInstance);
-                        resp.getWriter().println(result);
-                    } catch (Exception e) {
-                        e.printStackTrace();
-                        resp.sendError(HttpServletResponse.SC_INTERNAL_SERVER_ERROR, "Error");
-                    }
-                } else {
-                    resp.getWriter().println(path + " existe mais n'est pas supporté pour le moment");
+            Mapping mapp = urlMappings.get(path);
+            Method method = mapp.getMethod();
+            if(method.getReturnType().equals(String.class)) {
+                try {
+                    Object controllerInstance = mapp.getClazz().getDeclaredConstructor().newInstance();
+                    String result = (String) method.invoke(controllerInstance);
+                    resp.getWriter().println(result);
+                } catch (Exception e) {
+                    e.printStackTrace();
+                    resp.sendError(HttpServletResponse.SC_INTERNAL_SERVER_ERROR, "Error");
                 }
+            } else if(method.getReturnType().equals(ModelView.class)) {
+                try {
+                    Object controllerInstance = mapp.getClazz().getDeclaredConstructor().newInstance();
+                    ModelView mv = (ModelView) method.invoke(controllerInstance);
+                    String view = mv.getView();
+                    RequestDispatcher dispatcher = req.getRequestDispatcher(view);
+                    dispatcher.forward(req, resp);
+                } catch (Exception e) {
+                    e.printStackTrace();
+                    resp.sendError(HttpServletResponse.SC_INTERNAL_SERVER_ERROR, "Error");
+                }
+            } else {
+                resp.getWriter().println(path + " existe mais n'est pas supporté pour le moment");
             }
-            else {
+        } else {
             resp.getWriter().println(path + " n'est pas là'");
-            }
+        }
     }
 
 }
