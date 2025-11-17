@@ -54,6 +54,9 @@ public class FrontServlet extends HttpServlet {
                     Object controllerInstance = mapp.getClazz().getDeclaredConstructor().newInstance();
                     ModelView mv = (ModelView) method.invoke(controllerInstance);
                     String view = mv.getView();
+                    for (String key : mv.getAttributes().keySet()) {
+                        req.setAttribute(key, mv.getAttributes().get(key));
+                    }
                     RequestDispatcher dispatcher = req.getRequestDispatcher(view);
                     dispatcher.forward(req, resp);
                 } catch (Exception e) {
