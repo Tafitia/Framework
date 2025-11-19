@@ -8,6 +8,7 @@ import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import javax.servlet.RequestDispatcher;
 import java.lang.reflect.Method;
+import java.lang.reflect.Parameter;
 import myframework.util.AnnotationScanner;
 import myframework.util.Mapping;
 
@@ -94,12 +95,27 @@ public class FrontServlet extends HttpServlet {
     }
     
     private Object[] prepareMethodArguments(Method method, HttpServletRequest req) {
-        java.lang.reflect.Parameter[] parameters = method.getParameters();
+        Parameter[] parameters = method.getParameters();
         Object[] args = new Object[parameters.length];
         
         for (int i = 0; i < parameters.length; i++) {
-            String paramName = parameters[i].getName();
-            Class<?> paramType = parameters[i].getType();
+            Parameter parameter = parameters[i];
+            Class<?> paramType = parameter.getType();
+            String paramName;
+            
+            // Vérifier si le paramètre a l'annotation @RequestParam
+            if (parameter.isAnnotationPresent(RequestParam.class)) {
+                RequestParam requestParam = parameter.getAnnotation(RequestParam.class);
+                paramName = requestParam.value();
+                // Si value() est vide, utiliser le nom du paramètre
+                if (paramName == null || paramName.isEmpty()) {
+                    paramName = parameter.getName();
+                }
+            } else {
+                // Pas d'annotation, utiliser le nom du paramètre
+                paramName = parameter.getName();
+            }
+            
             String paramValue = req.getParameter(paramName);
             
             if (paramValue != null) {
