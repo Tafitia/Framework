@@ -57,7 +57,8 @@ public class FrontServlet extends HttpServlet {
             if(method.getReturnType().equals(String.class)) {
                 try {
                     Object controllerInstance = mapp.getClazz().getDeclaredConstructor().newInstance();
-                    String result = (String) method.invoke(controllerInstance);
+                    Object[] args = prepareMethodArguments(method, req);
+                    String result = (String) method.invoke(controllerInstance, args);
                     resp.getWriter().println(result);
                 } catch (Exception e) {
                     e.printStackTrace();
@@ -66,7 +67,8 @@ public class FrontServlet extends HttpServlet {
             } else if(method.getReturnType().equals(ModelView.class)) {
                 try {
                     Object controllerInstance = mapp.getClazz().getDeclaredConstructor().newInstance();
-                    ModelView mv = (ModelView) method.invoke(controllerInstance);
+                    Object[] args = prepareMethodArguments(method, req);
+                    ModelView mv = (ModelView) method.invoke(controllerInstance, args);
                     String view = mv.getView();
                     for (String key : mv.getAttributes().keySet()) {
                         req.setAttribute(key, mv.getAttributes().get(key));
@@ -89,6 +91,67 @@ public class FrontServlet extends HttpServlet {
         // Transforme /tests/{id} en regex /tests/[^/]+
         String regex = pattern.replaceAll("\\{[^/]+\\}", "[^/]+");
         return url.matches(regex);
+    }
+    
+    private Object[] prepareMethodArguments(Method method, HttpServletRequest req) {
+        java.lang.reflect.Parameter[] parameters = method.getParameters();
+        Object[] args = new Object[parameters.length];
+        
+        for (int i = 0; i < parameters.length; i++) {
+            String paramName = parameters[i].getName();
+            Class<?> paramType = parameters[i].getType();
+            String paramValue = req.getParameter(paramName);
+            
+            if (paramValue != null) {
+                // Convertir la valeur selon le type
+                args[i] = convertParameter(paramValue, paramType);
+            } else {
+                // Si pas de valeur, mettre null (ou 0 pour les primitifs)
+                args[i] = getDefaultValue(paramType);
+            }
+        }
+        
+        return args;
+    }
+    
+    private Object convertParameter(String value, Class<?> type) {
+        if (type.equals(String.class)) {
+            return value;
+        } else if (type.equals(int.class) || type.equals(Integer.class)) {
+            try {
+                return Integer.parseInt(value);
+            } catch (NumberFormatException e) {
+                return type.equals(int.class) ? 0 : null;
+            }
+        } else if (type.equals(long.class) || type.equals(Long.class)) {
+            try {
+                return Long.parseLong(value);
+            } catch (NumberFormatException e) {
+                return type.equals(long.class) ? 0L : null;
+            }
+        } else if (type.equals(double.class) || type.equals(Double.class)) {
+            try {
+                return Double.parseDouble(value);
+            } catch (NumberFormatException e) {
+                return type.equals(double.class) ? 0.0 : null;
+            }
+        } else if (type.equals(boolean.class) || type.equals(Boolean.class)) {
+            return Boolean.parseBoolean(value);
+        }
+        return null;
+    }
+    
+    private Object getDefaultValue(Class<?> type) {
+        if (type.equals(int.class)) {
+            return 0;
+        } else if (type.equals(long.class)) {
+            return 0L;
+        } else if (type.equals(double.class)) {
+            return 0.0;
+        } else if (type.equals(boolean.class)) {
+            return false;
+        }
+        return null;
     }
 
 }
