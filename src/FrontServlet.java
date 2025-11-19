@@ -37,8 +37,22 @@ public class FrontServlet extends HttpServlet {
             path = "/";
         }
         
+        Mapping mapp = null;
+        
+        // Recherche exacte d'abord
         if(urlMappings.containsKey(path)) {
-            Mapping mapp = urlMappings.get(path);
+            mapp = urlMappings.get(path);
+        } else {
+            // Recherche avec paramètres dynamiques
+            for (String pattern : urlMappings.keySet()) {
+                if (matchesUrlPattern(pattern, path)) {
+                    mapp = urlMappings.get(pattern);
+                    break;
+                }
+            }
+        }
+        
+        if(mapp != null) {
             Method method = mapp.getMethod();
             if(method.getReturnType().equals(String.class)) {
                 try {
@@ -69,6 +83,12 @@ public class FrontServlet extends HttpServlet {
         } else {
             resp.getWriter().println(path + " n'est pas là'");
         }
+    }
+    
+    private boolean matchesUrlPattern(String pattern, String url) {
+        // Transforme /tests/{id} en regex /tests/[^/]+
+        String regex = pattern.replaceAll("\\{[^/]+\\}", "[^/]+");
+        return url.matches(regex);
     }
 
 }
