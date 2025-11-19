@@ -39,6 +39,7 @@ public class FrontServlet extends HttpServlet {
         }
         
         Mapping mapp = null;
+        HashMap<String, String> pathVariables = new HashMap<>();
         
         // Recherche exacte d'abord
         if(urlMappings.containsKey(path)) {
@@ -46,8 +47,10 @@ public class FrontServlet extends HttpServlet {
         } else {
             // Recherche avec paramètres dynamiques
             for (String pattern : urlMappings.keySet()) {
-                if (matchesUrlPattern(pattern, path)) {
+                HashMap<String, String> extractedVars = extractPathVariables(pattern, path);
+                if (extractedVars != null) {
                     mapp = urlMappings.get(pattern);
+                    pathVariables = extractedVars;
                     break;
                 }
             }
@@ -58,7 +61,7 @@ public class FrontServlet extends HttpServlet {
             if(method.getReturnType().equals(String.class)) {
                 try {
                     Object controllerInstance = mapp.getClazz().getDeclaredConstructor().newInstance();
-                    Object[] args = prepareMethodArguments(method, req);
+                    Object[] args = prepareMethodArguments(method, req, pathVariables);
                     String result = (String) method.invoke(controllerInstance, args);
                     resp.getWriter().println(result);
                 } catch (Exception e) {
@@ -68,7 +71,7 @@ public class FrontServlet extends HttpServlet {
             } else if(method.getReturnType().equals(ModelView.class)) {
                 try {
                     Object controllerInstance = mapp.getClazz().getDeclaredConstructor().newInstance();
-                    Object[] args = prepareMethodArguments(method, req);
+                    Object[] args = prepareMethodArguments(method, req, pathVariables);
                     ModelView mv = (ModelView) method.invoke(controllerInstance, args);
                     String view = mv.getView();
                     for (String key : mv.getAttributes().keySet()) {
@@ -88,13 +91,43 @@ public class FrontServlet extends HttpServlet {
         }
     }
     
-    private boolean matchesUrlPattern(String pattern, String url) {
-        // Transforme /tests/{id} en regex /tests/[^/]+
-        String regex = pattern.replaceAll("\\{[^/]+\\}", "[^/]+");
-        return url.matches(regex);
+    private HashMap<String, String> extractPathVariables(String pattern, String url) {
+        HashMap<String, String> pathVariables = new HashMap<>();
+        
+        // Liste pour stocker les noms des paramètres dans l'ordre
+        java.util.ArrayList<String> paramNames = new java.util.ArrayList<>();
+        
+        // Construire la regex en remplaçant {param} par des groupes de capture
+        String regex = pattern;
+        java.util.regex.Pattern paramPattern = java.util.regex.Pattern.compile("\\{([^/]+)\\}");
+        java.util.regex.Matcher paramMatcher = paramPattern.matcher(pattern);
+        
+        // Extraire les noms des paramètres
+        while (paramMatcher.find()) {
+            paramNames.add(paramMatcher.group(1));
+        }
+        
+        // Transformer le pattern en regex avec groupes de capture
+        regex = regex.replaceAll("\\{[^/]+\\}", "([^/]+)");
+        
+        // Matcher l'URL avec la regex
+        java.util.regex.Pattern urlPattern = java.util.regex.Pattern.compile(regex);
+        java.util.regex.Matcher urlMatcher = urlPattern.matcher(url);
+        
+        if (urlMatcher.matches()) {
+            // Extraire les valeurs des groupes de capture
+            for (int i = 0; i < paramNames.size(); i++) {
+                String paramName = paramNames.get(i);
+                String paramValue = urlMatcher.group(i + 1);
+                pathVariables.put(paramName, paramValue);
+            }
+            return pathVariables;
+        }
+        
+        return null;
     }
     
-    private Object[] prepareMethodArguments(Method method, HttpServletRequest req) {
+    private Object[] prepareMethodArguments(Method method, HttpServletRequest req, HashMap<String, String> pathVariables) {
         Parameter[] parameters = method.getParameters();
         Object[] args = new Object[parameters.length];
         
@@ -116,7 +149,13 @@ public class FrontServlet extends HttpServlet {
                 paramName = parameter.getName();
             }
             
-            String paramValue = req.getParameter(paramName);
+            // Chercher d'abord dans les path variables
+            String paramValue = pathVariables.get(paramName);
+            
+            // Si pas trouvé, chercher dans les query parameters
+            if (paramValue == null) {
+                paramValue = req.getParameter(paramName);
+            }
             
             if (paramValue != null) {
                 // Convertir la valeur selon le type
