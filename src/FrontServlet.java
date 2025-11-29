@@ -2,6 +2,8 @@ package myframework;
 
 import java.io.IOException;
 import java.util.HashMap;
+import java.util.List;
+import java.util.ArrayList;
 import javax.servlet.ServletException;
 import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
@@ -14,7 +16,8 @@ import myframework.util.Mapping;
 
 public class FrontServlet extends HttpServlet {
     
-    private HashMap<String, Mapping> urlMappings;
+    // Changement ici : On stocke une liste de Mapping par URL
+    private HashMap<String, List<Mapping>> urlMappings;
 
     @Override
     public void init() throws ServletException {
@@ -38,53 +41,84 @@ public class FrontServlet extends HttpServlet {
             path = "/";
         }
         
-        Mapping mapp = null;
+        // On récupère une liste de candidats potentiels
+        List<Mapping> possibleMappings = null;
         HashMap<String, String> pathVariables = new HashMap<>();
         
         // Recherche exacte d'abord
         if(urlMappings.containsKey(path)) {
-            mapp = urlMappings.get(path);
+            possibleMappings = urlMappings.get(path);
         } else {
             // Recherche avec paramètres dynamiques
             for (String pattern : urlMappings.keySet()) {
                 HashMap<String, String> extractedVars = extractPathVariables(pattern, path);
                 if (extractedVars != null) {
-                    mapp = urlMappings.get(pattern);
+                    possibleMappings = urlMappings.get(pattern);
                     pathVariables = extractedVars;
                     break;
                 }
             }
         }
         
-        if(mapp != null) {
-            Method method = mapp.getMethod();
-            if(method.getReturnType().equals(String.class)) {
-                try {
-                    Object controllerInstance = mapp.getClazz().getDeclaredConstructor().newInstance();
-                    Object[] args = prepareMethodArguments(method, req, pathVariables);
-                    String result = (String) method.invoke(controllerInstance, args);
-                    resp.getWriter().println(result);
-                } catch (Exception e) {
-                    e.printStackTrace();
-                    resp.sendError(HttpServletResponse.SC_INTERNAL_SERVER_ERROR, "Error");
-                }
-            } else if(method.getReturnType().equals(ModelView.class)) {
-                try {
-                    Object controllerInstance = mapp.getClazz().getDeclaredConstructor().newInstance();
-                    Object[] args = prepareMethodArguments(method, req, pathVariables);
-                    ModelView mv = (ModelView) method.invoke(controllerInstance, args);
-                    String view = mv.getView();
-                    for (String key : mv.getAttributes().keySet()) {
-                        req.setAttribute(key, mv.getAttributes().get(key));
+        // Si on a trouvé l'URL (donc une liste de mappings)
+        if(possibleMappings != null) {
+            Mapping mapp = null;
+            String httpMethod = req.getMethod(); // ex: GET, POST
+            
+            // On cherche le bon mapping correspondant à la méthode HTTP
+            for (Mapping m : possibleMappings) {
+                Method methodToCheck = m.getMethod();
+                
+                // Vérification de l'annotation RequestMapping
+                if (methodToCheck.isAnnotationPresent(RequestMapping.class)) {
+                    String annotationMethod = methodToCheck.getAnnotation(RequestMapping.class).value();
+                    if (annotationMethod.equalsIgnoreCase(httpMethod)) {
+                        mapp = m;
+                        break;
                     }
-                    RequestDispatcher dispatcher = req.getRequestDispatcher(view);
-                    dispatcher.forward(req, resp);
-                } catch (Exception e) {
-                    e.printStackTrace();
-                    resp.sendError(HttpServletResponse.SC_INTERNAL_SERVER_ERROR, "Error");
+                } else {
+                    // Si pas d'annotation, c'est un candidat par défaut (si on n'a rien trouvé de mieux)
+                    if (mapp == null) {
+                        mapp = m;
+                    }
+                }
+            }
+
+            // Si on a trouvé une méthode compatible
+            if(mapp != null) {
+                Method method = mapp.getMethod();
+                if(method.getReturnType().equals(String.class)) {
+                    try {
+                        Object controllerInstance = mapp.getClazz().getDeclaredConstructor().newInstance();
+                        Object[] args = prepareMethodArguments(method, req, pathVariables);
+                        String result = (String) method.invoke(controllerInstance, args);
+                        resp.getWriter().println(result);
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                        resp.sendError(HttpServletResponse.SC_INTERNAL_SERVER_ERROR, "Error");
+                    }
+                } else if(method.getReturnType().equals(ModelView.class)) {
+                    try {
+                        Object controllerInstance = mapp.getClazz().getDeclaredConstructor().newInstance();
+                        Object[] args = prepareMethodArguments(method, req, pathVariables);
+                        ModelView mv = (ModelView) method.invoke(controllerInstance, args);
+                        String view = mv.getView();
+                        for (String key : mv.getAttributes().keySet()) {
+                            req.setAttribute(key, mv.getAttributes().get(key));
+                        }
+                        RequestDispatcher dispatcher = req.getRequestDispatcher(view);
+                        dispatcher.forward(req, resp);
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                        resp.sendError(HttpServletResponse.SC_INTERNAL_SERVER_ERROR, "Error");
+                    }
+                } else {
+                    resp.getWriter().println(path + " existe mais n'est pas supporté pour le moment");
                 }
             } else {
-                resp.getWriter().println(path + " existe mais n'est pas supporté pour le moment");
+                // L'URL existe, mais pas pour cette méthode HTTP (ex: POST vs GET)
+                resp.setStatus(HttpServletResponse.SC_METHOD_NOT_ALLOWED);
+                resp.getWriter().println("Erreur 405 : Methode " + httpMethod + " non supportee pour " + path);
             }
         } else {
             resp.getWriter().println(path + " n'est pas là'");
@@ -208,5 +242,4 @@ public class FrontServlet extends HttpServlet {
         }
         return null;
     }
-
 }
