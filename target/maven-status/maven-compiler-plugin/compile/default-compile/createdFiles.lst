@@ -1,5 +1,6 @@
 myframework\util\Mapping.class
 myframework\RequestParam.class
+myframework\RequestMapping.class
 myframework\util\AnnotationScanner.class
 myframework\FrontServlet.class
 myframework\ModelView.class
