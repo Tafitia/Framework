@@ -3,6 +3,7 @@ package myframework;
 import java.io.IOException;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.ArrayList;
 import javax.servlet.ServletException;
 import javax.servlet.http.HttpServlet;
@@ -11,6 +12,8 @@ import javax.servlet.http.HttpServletResponse;
 import javax.servlet.RequestDispatcher;
 import java.lang.reflect.Method;
 import java.lang.reflect.Parameter;
+import java.sql.Date;
+
 import myframework.util.AnnotationScanner;
 import myframework.util.Mapping;
 
@@ -170,6 +173,45 @@ public class FrontServlet extends HttpServlet {
             Class<?> paramType = parameter.getType();
             String paramName;
             
+           if (Map.class.isAssignableFrom(paramType)) {
+                Map<String, Object[]> paramMap = new HashMap<>();
+                Map<String, String[]> rawMap = req.getParameterMap();
+
+                // Récupération des types attendus via les autres arguments de la méthode
+                Map<String, Class<?>> expectedTypes = new HashMap<>();
+                for (Parameter p : parameters) {
+                    if (!Map.class.isAssignableFrom(p.getType())) {
+                        String name = p.getName();
+                        if (p.isAnnotationPresent(RequestParam.class)) {
+                            String annVal = p.getAnnotation(RequestParam.class).value();
+                            if(annVal != null && !annVal.isEmpty()) name = annVal;
+                        }
+                        expectedTypes.put(name, p.getType());
+                    }
+                }
+
+                for (String key : rawMap.keySet()) {
+                    String[] values = rawMap.get(key);
+                    Object[] convertedValues = new Object[values.length];
+
+                    // Si on connait le type (car il est présent dans les arguments de la méthode)
+                    if (expectedTypes.containsKey(key)) {
+                        convertedValues = castArrayToType(values, expectedTypes.get(key));
+                    } else {
+                        // SINON : Inférence de type automatique
+                        for (int k = 0; k < values.length; k++) {
+                            convertedValues[k] = inferType(values[k]);
+                        }
+                    }
+                    paramMap.put(key, convertedValues);
+                }
+                // Ajout des path variables avec inférence
+                for (String key : pathVariables.keySet()) {
+                    paramMap.putIfAbsent(key, new Object[]{ inferType(pathVariables.get(key)) });
+                }
+                args[i] = paramMap;
+                continue;
+            }
             // Vérifier si le paramètre a l'annotation @RequestParam
             if (parameter.isAnnotationPresent(RequestParam.class)) {
                 RequestParam requestParam = parameter.getAnnotation(RequestParam.class);
@@ -203,43 +245,56 @@ public class FrontServlet extends HttpServlet {
         return args;
     }
     
-    private Object convertParameter(String value, Class<?> type) {
-        if (type.equals(String.class)) {
-            return value;
-        } else if (type.equals(int.class) || type.equals(Integer.class)) {
+    private Object inferType(String value) {
+        if (value == null) return null;
+        // 1. Date (YYYY-MM-DD)
+        if (value.matches("\\d{4}-\\d{2}-\\d{2}")) {
             try {
-                return Integer.parseInt(value);
-            } catch (NumberFormatException e) {
-                return type.equals(int.class) ? 0 : null;
-            }
-        } else if (type.equals(long.class) || type.equals(Long.class)) {
-            try {
-                return Long.parseLong(value);
-            } catch (NumberFormatException e) {
-                return type.equals(long.class) ? 0L : null;
-            }
-        } else if (type.equals(double.class) || type.equals(Double.class)) {
-            try {
-                return Double.parseDouble(value);
-            } catch (NumberFormatException e) {
-                return type.equals(double.class) ? 0.0 : null;
-            }
-        } else if (type.equals(boolean.class) || type.equals(Boolean.class)) {
+                return Date.valueOf(value);
+            } catch (Exception ignored) {}
+        }
+        // 2. Integer
+        try {
+            return Integer.parseInt(value);
+        } catch (NumberFormatException ignored) {}
+        // 3. Double
+        try {
+            return Double.parseDouble(value);
+        } catch (NumberFormatException ignored) {}
+        // 4. Boolean 
+        if(value.equalsIgnoreCase("true") || value.equalsIgnoreCase("false")) {
             return Boolean.parseBoolean(value);
+        }
+        // 5. String
+        return value;
+    }
+
+    private Object[] castArrayToType(String[] values, Class<?> type) {
+        Object[] result = new Object[values.length];
+        for (int i = 0; i < values.length; i++) {
+            result[i] = convertParameter(values[i], type);
+        }
+        return result;
+    }
+    private Object convertParameter(String value, Class<?> type) {
+        if (type.equals(String.class)) return value;
+        try {
+            if (type.equals(int.class) || type.equals(Integer.class)) return Integer.parseInt(value);
+            if (type.equals(long.class) || type.equals(Long.class)) return Long.parseLong(value);
+            if (type.equals(double.class) || type.equals(Double.class)) return Double.parseDouble(value);
+            if (type.equals(boolean.class) || type.equals(Boolean.class)) return Boolean.parseBoolean(value);
+            if (type.equals(Date.class)) return Date.valueOf(value);
+        } catch (Exception e) {
+            // En cas d'erreur de conversion, on retourne null ou valeur par defaut
         }
         return null;
     }
     
     private Object getDefaultValue(Class<?> type) {
-        if (type.equals(int.class)) {
-            return 0;
-        } else if (type.equals(long.class)) {
-            return 0L;
-        } else if (type.equals(double.class)) {
-            return 0.0;
-        } else if (type.equals(boolean.class)) {
-            return false;
-        }
+        if (type.equals(int.class)) return 0;
+        if (type.equals(long.class)) return 0L;
+        if (type.equals(double.class)) return 0.0;
+        if (type.equals(boolean.class)) return false;
         return null;
     }
 }
