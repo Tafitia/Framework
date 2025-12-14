@@ -16,6 +16,7 @@ import java.sql.Date;
 
 import myframework.util.AnnotationScanner;
 import myframework.util.Mapping;
+import myframework.util.DataBinder;
 
 public class FrontServlet extends HttpServlet {
     
@@ -171,7 +172,7 @@ public class FrontServlet extends HttpServlet {
         for (int i = 0; i < parameters.length; i++) {
             Parameter parameter = parameters[i];
             Class<?> paramType = parameter.getType();
-            String paramName;
+            String paramName = parameter.getName();
             
            if (Map.class.isAssignableFrom(paramType)) {
                 Map<String, Object[]> paramMap = new HashMap<>();
@@ -212,6 +213,70 @@ public class FrontServlet extends HttpServlet {
                 args[i] = paramMap;
                 continue;
             }
+
+            // 2. GESTION TABLEAUX D'OBJETS (Employe[] e) - NOUVEAU
+            if (paramType.isArray()) {
+                try {
+                    String prefix = paramName;
+                    if (parameter.isAnnotationPresent(RequestParam.class)) {
+                        String val = parameter.getAnnotation(RequestParam.class).value();
+                        if(val != null && !val.isEmpty()) prefix = val;
+                    }
+                    
+                    Class<?> componentType = paramType.getComponentType();
+                    int maxIndex = -1;
+                    String arraySearch = prefix + "[";
+                    java.util.Enumeration<String> allParams = req.getParameterNames();
+                    while(allParams.hasMoreElements()){
+                        String key = allParams.nextElement();
+                        if(key.startsWith(arraySearch)){
+                            try {
+                                int end = key.indexOf("]", arraySearch.length());
+                                int idx = Integer.parseInt(key.substring(arraySearch.length(), end));
+                                if(idx > maxIndex) maxIndex = idx;
+                            } catch(Exception e){}
+                        }
+                    }
+                    
+                    if(maxIndex >= 0) {
+                        Object arrayInstance = java.lang.reflect.Array.newInstance(componentType, maxIndex + 1);
+                        for(int idx=0; idx<=maxIndex; idx++){
+                            Object element = componentType.getDeclaredConstructor().newInstance();
+                            DataBinder.bind(element, prefix + "[" + idx + "]", req.getParameterMap());
+                            java.lang.reflect.Array.set(arrayInstance, idx, element);
+                        }
+                        args[i] = arrayInstance;
+                    } else {
+                        args[i] = java.lang.reflect.Array.newInstance(componentType, 0);
+                    }
+                } catch (Exception e) {
+                    e.printStackTrace();
+                    args[i] = null;
+                }
+                continue;
+            }
+
+            // 3. GESTION OBJETS COMPLEXES (Employe e) - NOUVEAU
+            // Si ce n'est pas un type simple, ni ModelView, ni Map, c'est un objet
+            if (!isSimpleType(paramType) && !paramType.equals(ModelView.class)) {
+                try {
+                    String prefix = paramName;
+                    if (parameter.isAnnotationPresent(RequestParam.class)) {
+                        String val = parameter.getAnnotation(RequestParam.class).value();
+                        if(val != null && !val.isEmpty()) prefix = val;
+                    }
+
+                    Object dataObject = paramType.getDeclaredConstructor().newInstance();
+                    DataBinder.bind(dataObject, prefix, req.getParameterMap());
+                    args[i] = dataObject;
+                    continue; 
+                } catch (Exception e) {
+                    e.printStackTrace();
+                    args[i] = null;
+                    continue;
+                }
+            }
+
             // Vérifier si le paramètre a l'annotation @RequestParam
             if (parameter.isAnnotationPresent(RequestParam.class)) {
                 RequestParam requestParam = parameter.getAnnotation(RequestParam.class);
@@ -244,7 +309,17 @@ public class FrontServlet extends HttpServlet {
         
         return args;
     }
-    
+
+    private boolean isSimpleType(Class<?> type) {
+        return type.isPrimitive() || 
+               type.equals(String.class) || 
+               type.equals(Integer.class) || 
+               type.equals(Long.class) || 
+               type.equals(Double.class) || 
+               type.equals(Boolean.class) || 
+               type.equals(Date.class);
+    }
+
     private Object inferType(String value) {
         if (value == null) return null;
         // 1. Date (YYYY-MM-DD)
