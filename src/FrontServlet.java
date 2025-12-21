@@ -1,10 +1,13 @@
 package myframework;
 
 import java.io.IOException;
+import java.io.PrintWriter;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.ArrayList;
+import java.util.Collection;
+
 import javax.servlet.ServletException;
 import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
@@ -16,6 +19,7 @@ import java.sql.Date;
 
 import myframework.util.AnnotationScanner;
 import myframework.util.Mapping;
+import myframework.util.JsonUtil;
 import myframework.util.DataBinder;
 
 public class FrontServlet extends HttpServlet {
@@ -91,6 +95,65 @@ public class FrontServlet extends HttpServlet {
             // Si on a trouvé une méthode compatible
             if(mapp != null) {
                 Method method = mapp.getMethod();
+
+                if (method.isAnnotationPresent(Json.class)) {
+                    // On prépare la réponse JSON
+                    resp.setContentType("application/json;charset=UTF-8");
+                    PrintWriter out = resp.getWriter();
+                    
+                    try {
+                        Object controllerInstance = mapp.getClazz().getDeclaredConstructor().newInstance();
+                        Object[] args = prepareMethodArguments(method, req, pathVariables);
+                        Object returnValue = method.invoke(controllerInstance, args);
+
+                        // Structure globale de la réponse
+                        // LinkedHashMap pour garder l'ordre : status, code, data
+                        Map<String, Object> finalResponse = new java.util.LinkedHashMap<>();
+                        finalResponse.put("status", "success");
+                        finalResponse.put("code", 200);
+
+                        // Gestion du contenu de "data"
+                        if (returnValue instanceof Collection || (returnValue != null && returnValue.getClass().isArray())) {
+                            // CAS 1 : C'est une Liste ou un Tableau
+                            // Structure : data: { count: X, items: [...] }
+                            int size = 0;
+                            if (returnValue instanceof Collection) {
+                                size = ((Collection<?>) returnValue).size();
+                            } else {
+                                size = java.lang.reflect.Array.getLength(returnValue);
+                            }
+
+                            Map<String, Object> dataContent = new java.util.LinkedHashMap<>();
+                            dataContent.put("count", size);
+                            dataContent.put("items", returnValue);
+                            
+                            finalResponse.put("data", dataContent);
+
+                        } else {
+                            // CAS 2 : C'est un objet unique (String, Employe, etc.)
+                            // Structure : data: l'objet lui-même
+                            finalResponse.put("data", returnValue);
+                        }
+                        
+                        // Transformation en JSON via Jackson
+                        out.println(JsonUtil.toJson(finalResponse));
+                        
+                        return; // On arrête ici
+
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                        resp.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
+                        
+                        // Gestion propre de l'erreur en JSON
+                        Map<String, Object> errorResponse = new java.util.LinkedHashMap<>();
+                        errorResponse.put("status", "error");
+                        errorResponse.put("code", 500);
+                        errorResponse.put("message", e.getCause() != null ? e.getCause().getMessage() : e.getMessage());
+                        
+                        out.println(JsonUtil.toJson(errorResponse));
+                        return;
+                    }
+                }
                 if(method.getReturnType().equals(String.class)) {
                     try {
                         Object controllerInstance = mapp.getClazz().getDeclaredConstructor().newInstance();
