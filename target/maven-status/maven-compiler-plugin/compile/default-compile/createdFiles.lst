@@ -1,4 +1,6 @@
+myframework\util\JsonUtil.class
 myframework\util\Mapping.class
+myframework\Json.class
 myframework\RequestParam.class
 myframework\RequestMapping.class
 myframework\util\AnnotationScanner.class
