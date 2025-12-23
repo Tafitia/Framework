@@ -1,6 +1,7 @@
 package myframework;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.PrintWriter;
 import java.util.HashMap;
 import java.util.List;
@@ -9,12 +10,16 @@ import java.util.ArrayList;
 import java.util.Collection;
 
 import javax.servlet.ServletException;
+import javax.servlet.annotation.MultipartConfig;
 import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
+import javax.servlet.http.Part;
 import javax.servlet.RequestDispatcher;
 import java.lang.reflect.Method;
 import java.lang.reflect.Parameter;
+import java.lang.reflect.ParameterizedType;
+import java.lang.reflect.Type;            
 import java.sql.Date;
 
 import myframework.util.AnnotationScanner;
@@ -22,6 +27,7 @@ import myframework.util.Mapping;
 import myframework.util.JsonUtil;
 import myframework.util.DataBinder;
 
+@MultipartConfig // Indispensable pour recevoir des fichiers
 public class FrontServlet extends HttpServlet {
     
     // Changement ici : On stocke une liste de Mapping par URL
@@ -131,7 +137,6 @@ public class FrontServlet extends HttpServlet {
 
                         } else {
                             // CAS 2 : C'est un objet unique (String, Employe, etc.)
-                            // Structure : data: l'objet lui-même
                             finalResponse.put("data", returnValue);
                         }
                         
@@ -232,66 +237,113 @@ public class FrontServlet extends HttpServlet {
         Parameter[] parameters = method.getParameters();
         Object[] args = new Object[parameters.length];
         
+        Map<String, String[]> parameterMap = req.getParameterMap();
+
         for (int i = 0; i < parameters.length; i++) {
             Parameter parameter = parameters[i];
             Class<?> paramType = parameter.getType();
             String paramName = parameter.getName();
             
-           if (Map.class.isAssignableFrom(paramType)) {
-                Map<String, Object[]> paramMap = new HashMap<>();
-                Map<String, String[]> rawMap = req.getParameterMap();
+            // 1. GESTION DU NOM DU PARAMETRE
+            if (parameter.isAnnotationPresent(RequestParam.class)) {
+                String annVal = parameter.getAnnotation(RequestParam.class).value();
+                if(annVal != null && !annVal.isEmpty()) paramName = annVal;
+            }
+            //  2. GESTION DES MAPS (Parameters ou Uploads)
+            if (Map.class.isAssignableFrom(paramType)) {
+                
+                Type genericType = parameter.getParameterizedType();
+                Type valueType = null;
+                if (genericType instanceof ParameterizedType) {
+                    valueType = ((ParameterizedType) genericType).getActualTypeArguments()[1];
+                }
 
-                // Récupération des types attendus via les autres arguments de la méthode
-                Map<String, Class<?>> expectedTypes = new HashMap<>();
-                for (Parameter p : parameters) {
-                    if (!Map.class.isAssignableFrom(p.getType())) {
-                        String name = p.getName();
-                        if (p.isAnnotationPresent(RequestParam.class)) {
-                            String annVal = p.getAnnotation(RequestParam.class).value();
-                            if(annVal != null && !annVal.isEmpty()) name = annVal;
+                boolean handled = false;
+
+                // --- CAS UNIQUE : TOUT UPLOAD DEVIENT Map<String, byte[]> ---
+                // "Astuce Suprême" : Nom du fichier concaténé dans la clé
+                if (valueType == byte[].class) {
+                    Map<String, byte[]> fileMap = new HashMap<>();
+                    
+                    if (isMultipart(req)) {
+                        try {
+                            for (Part part : req.getParts()) {
+                                if (isPartFile(part)) {
+                                    try (InputStream is = part.getInputStream()) {
+                                        java.io.ByteArrayOutputStream buffer = new java.io.ByteArrayOutputStream();
+                                        int nRead;
+                                        byte[] data = new byte[1024];
+                                        while ((nRead = is.read(data, 0, data.length)) != -1) {
+                                            buffer.write(data, 0, nRead);
+                                        }
+                                        
+                                        // Concaténation : nomInput_nomFichierOriginal
+                                        String originalName = part.getSubmittedFileName();
+                                        String uniqueKey = part.getName() + "_" + originalName;
+                                        
+                                        // Gestion des doublons
+                                        if (fileMap.containsKey(uniqueKey)) {
+                                            uniqueKey = part.getName() + "_" + System.currentTimeMillis() + "_" + originalName;
+                                        }
+
+                                        fileMap.put(uniqueKey, buffer.toByteArray());
+                                    }
+                                }
+                            }
+                        } catch (Exception e) {
+                            e.printStackTrace();
                         }
-                        expectedTypes.put(name, p.getType());
                     }
+                    args[i] = fileMap;
+                    handled = true;
                 }
 
-                for (String key : rawMap.keySet()) {
-                    String[] values = rawMap.get(key);
-                    Object[] convertedValues = new Object[values.length];
-
-                    // Si on connait le type (car il est présent dans les arguments de la méthode)
-                    if (expectedTypes.containsKey(key)) {
-                        convertedValues = castArrayToType(values, expectedTypes.get(key));
-                    } else {
-                        // SINON : Inférence de type automatique
-                        for (int k = 0; k < values.length; k++) {
-                            convertedValues[k] = inferType(values[k]);
+                // --- CAS 3 : Paramètres classiques (Map<String, Object[]>) ---
+                if (!handled) {
+                    Map<String, Object[]> paramMap = new HashMap<>();
+                    
+                    Map<String, Class<?>> expectedTypes = new HashMap<>();
+                    for (Parameter p : parameters) {
+                        if (!Map.class.isAssignableFrom(p.getType())) {
+                            String name = p.getName();
+                            if (p.isAnnotationPresent(RequestParam.class)) {
+                                String val = p.getAnnotation(RequestParam.class).value();
+                                if(val != null && !val.isEmpty()) name = val;
+                            }
+                            expectedTypes.put(name, p.getType());
                         }
                     }
-                    paramMap.put(key, convertedValues);
+
+                    for (String key : parameterMap.keySet()) {
+                        String[] values = parameterMap.get(key);
+                        Object[] convertedValues = new Object[values.length];
+                        
+                        if (expectedTypes.containsKey(key)) {
+                            convertedValues = castArrayToType(values, expectedTypes.get(key));
+                        } else {
+                            for (int k = 0; k < values.length; k++) {
+                                convertedValues[k] = inferType(values[k]);
+                            }
+                        }
+                        paramMap.put(key, convertedValues);
+                    }
+                    
+                    for (String key : pathVariables.keySet()) {
+                        paramMap.putIfAbsent(key, new Object[]{ inferType(pathVariables.get(key)) });
+                    }
+                    args[i] = paramMap;
                 }
-                // Ajout des path variables avec inférence
-                for (String key : pathVariables.keySet()) {
-                    paramMap.putIfAbsent(key, new Object[]{ inferType(pathVariables.get(key)) });
-                }
-                args[i] = paramMap;
                 continue;
             }
 
-            // 2. GESTION TABLEAUX D'OBJETS (Employe[] e) - NOUVEAU
+            // 3. GESTION TABLEAUX D'OBJETS
             if (paramType.isArray()) {
                 try {
-                    String prefix = paramName;
-                    if (parameter.isAnnotationPresent(RequestParam.class)) {
-                        String val = parameter.getAnnotation(RequestParam.class).value();
-                        if(val != null && !val.isEmpty()) prefix = val;
-                    }
-                    
                     Class<?> componentType = paramType.getComponentType();
                     int maxIndex = -1;
-                    String arraySearch = prefix + "[";
-                    java.util.Enumeration<String> allParams = req.getParameterNames();
-                    while(allParams.hasMoreElements()){
-                        String key = allParams.nextElement();
+                    String arraySearch = paramName + "[";
+                    
+                    for(String key : parameterMap.keySet()){
                         if(key.startsWith(arraySearch)){
                             try {
                                 int end = key.indexOf("]", arraySearch.length());
@@ -305,7 +357,7 @@ public class FrontServlet extends HttpServlet {
                         Object arrayInstance = java.lang.reflect.Array.newInstance(componentType, maxIndex + 1);
                         for(int idx=0; idx<=maxIndex; idx++){
                             Object element = componentType.getDeclaredConstructor().newInstance();
-                            DataBinder.bind(element, prefix + "[" + idx + "]", req.getParameterMap());
+                            DataBinder.bind(element, paramName + "[" + idx + "]", parameterMap);
                             java.lang.reflect.Array.set(arrayInstance, idx, element);
                         }
                         args[i] = arrayInstance;
@@ -319,18 +371,11 @@ public class FrontServlet extends HttpServlet {
                 continue;
             }
 
-            // 3. GESTION OBJETS COMPLEXES (Employe e) - NOUVEAU
-            // Si ce n'est pas un type simple, ni ModelView, ni Map, c'est un objet
+            // 4. GESTION OBJETS COMPLEXES
             if (!isSimpleType(paramType) && !paramType.equals(ModelView.class)) {
                 try {
-                    String prefix = paramName;
-                    if (parameter.isAnnotationPresent(RequestParam.class)) {
-                        String val = parameter.getAnnotation(RequestParam.class).value();
-                        if(val != null && !val.isEmpty()) prefix = val;
-                    }
-
                     Object dataObject = paramType.getDeclaredConstructor().newInstance();
-                    DataBinder.bind(dataObject, prefix, req.getParameterMap());
+                    DataBinder.bind(dataObject, paramName, parameterMap);
                     args[i] = dataObject;
                     continue; 
                 } catch (Exception e) {
@@ -340,32 +385,16 @@ public class FrontServlet extends HttpServlet {
                 }
             }
 
-            // Vérifier si le paramètre a l'annotation @RequestParam
-            if (parameter.isAnnotationPresent(RequestParam.class)) {
-                RequestParam requestParam = parameter.getAnnotation(RequestParam.class);
-                paramName = requestParam.value();
-                // Si value() est vide, utiliser le nom du paramètre
-                if (paramName == null || paramName.isEmpty()) {
-                    paramName = parameter.getName();
-                }
-            } else {
-                // Pas d'annotation, utiliser le nom du paramètre
-                paramName = parameter.getName();
-            }
-            
-            // Chercher d'abord dans les path variables
+            // 5. GESTION TYPES SIMPLES
             String paramValue = pathVariables.get(paramName);
-            
-            // Si pas trouvé, chercher dans les query parameters
-            if (paramValue == null) {
-                paramValue = req.getParameter(paramName);
+            if (paramValue == null && parameterMap.containsKey(paramName)) {
+                String[] vals = parameterMap.get(paramName);
+                if(vals.length > 0) paramValue = vals[0];
             }
             
             if (paramValue != null) {
-                // Convertir la valeur selon le type
                 args[i] = convertParameter(paramValue, paramType);
             } else {
-                // Si pas de valeur, mettre null (ou 0 pour les primitifs)
                 args[i] = getDefaultValue(paramType);
             }
         }
@@ -385,25 +414,14 @@ public class FrontServlet extends HttpServlet {
 
     private Object inferType(String value) {
         if (value == null) return null;
-        // 1. Date (YYYY-MM-DD)
         if (value.matches("\\d{4}-\\d{2}-\\d{2}")) {
-            try {
-                return Date.valueOf(value);
-            } catch (Exception ignored) {}
+            try { return Date.valueOf(value); } catch (Exception ignored) {}
         }
-        // 2. Integer
-        try {
-            return Integer.parseInt(value);
-        } catch (NumberFormatException ignored) {}
-        // 3. Double
-        try {
-            return Double.parseDouble(value);
-        } catch (NumberFormatException ignored) {}
-        // 4. Boolean 
+        try { return Integer.parseInt(value); } catch (NumberFormatException ignored) {}
+        try { return Double.parseDouble(value); } catch (NumberFormatException ignored) {}
         if(value.equalsIgnoreCase("true") || value.equalsIgnoreCase("false")) {
             return Boolean.parseBoolean(value);
         }
-        // 5. String
         return value;
     }
 
@@ -434,5 +452,14 @@ public class FrontServlet extends HttpServlet {
         if (type.equals(double.class)) return 0.0;
         if (type.equals(boolean.class)) return false;
         return null;
+    }
+
+    private boolean isMultipart(HttpServletRequest req) {
+        String contentType = req.getContentType();
+        return contentType != null && contentType.startsWith("multipart/form-data");
+    }
+
+    private boolean isPartFile(Part part) {
+        return part.getSubmittedFileName() != null && !part.getSubmittedFileName().isEmpty();
     }
 }
