@@ -27,16 +27,24 @@ import myframework.util.Mapping;
 import myframework.util.JsonUtil;
 import myframework.util.DataBinder;
 import myframework.util.SessionUtil;
+import myframework.util.ConfigLoader;
 
 @MultipartConfig // Indispensable pour recevoir des fichiers
 public class FrontServlet extends HttpServlet {
     
     // Changement ici : On stocke une liste de Mapping par URL
     private HashMap<String, List<Mapping>> urlMappings;
+    
+    private String authSessionName;
 
     @Override
     public void init() throws ServletException {
         super.init();
+
+        ConfigLoader config = new ConfigLoader();
+        this.authSessionName = config.get("Auth_name", "user_role");
+        System.out.println("Auth session name: " + this.authSessionName);
+
         urlMappings = AnnotationScanner.scanControllers();
     }
 
@@ -103,6 +111,31 @@ public class FrontServlet extends HttpServlet {
             if(mapp != null) {
                 Method method = mapp.getMethod();
 
+                if (method.isAnnotationPresent(Auth.class)) {
+                
+                    String roleRequis = method.getAnnotation(Auth.class).value();
+                    
+                    // On utilise le nom chargé dynamiquement
+                    Object sessionValue = req.getSession().getAttribute(this.authSessionName);
+                    String roleActuel = (sessionValue != null) ? sessionValue.toString() : null;
+
+                    boolean isAuthorized = false;
+
+                    if (roleActuel != null) {
+                        if (roleRequis.isEmpty()) {
+                            isAuthorized = true;
+                        } 
+                        else if (roleActuel.equals(roleRequis)) {
+                            isAuthorized = true;
+                        }
+                    }
+
+                    if (!isAuthorized) {
+                        resp.setStatus(403);
+                        resp.getWriter().println("Acces Interdit");
+                        return;
+                    }
+                }
                 if (method.isAnnotationPresent(Json.class)) {
                     // On prépare la réponse JSON
                     resp.setContentType("application/json;charset=UTF-8");
