@@ -26,6 +26,7 @@ import myframework.util.AnnotationScanner;
 import myframework.util.Mapping;
 import myframework.util.JsonUtil;
 import myframework.util.DataBinder;
+import myframework.util.SessionUtil;
 
 @MultipartConfig // Indispensable pour recevoir des fichiers
 public class FrontServlet extends HttpServlet {
@@ -244,6 +245,10 @@ public class FrontServlet extends HttpServlet {
             Class<?> paramType = parameter.getType();
             String paramName = parameter.getName();
             
+            if (parameters[i].getType().equals(SessionUtil.class)) {
+                args[i] = new SessionUtil(req.getSession());
+                continue;
+            }
             // 1. GESTION DU NOM DU PARAMETRE
             if (parameter.isAnnotationPresent(RequestParam.class)) {
                 String annVal = parameter.getAnnotation(RequestParam.class).value();

@@ -9,3 +9,4 @@ myframework\ModelView.class
 myframework\UrlAnnotation.class
 myframework\Controller.class
 myframework\util\DataBinder.class
+myframework\util\SessionUtil.class
